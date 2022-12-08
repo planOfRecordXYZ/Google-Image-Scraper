@@ -17,15 +17,18 @@ import time
 import urllib.request
 from urllib.parse import urlparse
 import os
+import sys
 import requests
 import io
 from PIL import Image
+import cv2
+import numpy as np
 
 #custom patch libraries
 import patch
 
 class GoogleImageScraper():
-    def __init__(self, webdriver_path, image_path, search_key="cat", number_of_images=1, headless=True, min_resolution=(0, 0), max_resolution=(1920, 1080), max_missed=10):
+    def __init__(self, webdriver_path, image_path, search_key, number_of_images, headless, output_size, keep_filenames, max_missed, token_name):
         #check parameter types
         image_path = os.path.join(image_path, search_key)
         if (type(number_of_images)!=int):
@@ -65,20 +68,99 @@ class GoogleImageScraper():
         self.image_path = image_path
         self.url = "https://www.google.com/search?q=%s&source=lnms&tbm=isch&sa=X&ved=2ahUKEwie44_AnqLpAhUhBWMBHUFGD90Q_AUoAXoECBUQAw&biw=1920&bih=947"%(search_key)
         self.headless=headless
-        self.min_resolution = min_resolution
-        self.max_resolution = max_resolution
+        self.output_size = output_size
+        self.keep_filenames = keep_filenames
         self.max_missed = max_missed
+        self.token_name = token_name
 
-    def find_image_urls(self):
-        """
-            This function search and return a list of image urls based on the search key.
-            Example:
-                google_image_scraper = GoogleImageScraper("webdriver_path","image_path","search_key",number_of_photos)
-                image_urls = google_image_scraper.find_image_urls()
+    def detect_faces(self, image):
+      # Convert the image from PIL.Image format to a NumPy array
+      image = np.array(image)
 
-        """
+      # Convert the image to grayscale
+      gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+      # Load the face detector
+      face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+
+      # Detect faces in the image
+      faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+
+      # Return the list of face bounding boxes
+      return faces
+
+    def process_image(self, image, path):
+        width, height = image.size
+
+        if width < self.output_size or height < self.output_size:
+            raise Exception("Has smaller resolution than output_size, skipping")
+
+        if width < height:
+            new_width = self.output_size
+            new_height = int(height * self.output_size / width)
+        else:
+            new_width = int(width * self.output_size / height)
+            new_height = self.output_size
+
+        image = image.resize((new_width, new_height), Image.ANTIALIAS)
+        face_boxes = self.detect_faces(image)
+
+        if len(face_boxes) == 0:
+            raise Exception("Has no faces")
+
+        if len(face_boxes) > 1:
+            raise Exception("Has more than one face")
+
+        face_box = face_boxes[0]
+        center_x = face_box[0] + face_box[2] / 2
+        center_y = face_box[1] + face_box[3] / 2
+        top = center_y - self.output_size / 2
+        left = center_x - self.output_size / 2
+
+        if top < 0:
+            top = 0
+        if left < 0:
+            left = 0
+        if top + self.output_size > height:
+            top = height - self.output_size
+        if left + self.output_size > width:
+            left = width - self.output_size
+
+        image = image.crop((left, top, left + self.output_size, top + self.output_size))
+        image.save(path)
+
+    def process_url(self, image_url, count):
+        print("[INFO] Saving image with URL: %s"%(image_url))
+        search_string = ''.join(e for e in self.search_key if e.isalnum())
+        image = requests.get(image_url,timeout=5)
+        if image.status_code != 200:
+            raise Exception("Discarded due to error code %s"%(image.status_code))
+        else:
+            with Image.open(io.BytesIO(image.content)) as image_from_web:
+                try:
+                    if (self.keep_filenames):
+                        #extact filename without extension from URL
+                        o = urlparse(image_url)
+                        image_url = o.scheme + "://" + o.netloc + o.path
+                        name = os.path.splitext(os.path.basename(image_url))[0]
+                        #join filename and extension
+                        filename = "%s.%s"%(name,image_from_web.format.lower())
+                    else:
+                        filename = "%s (%s).%s"%(self.token_name,str(count + 1),image_from_web.format.lower())
+
+                    image_path = os.path.join(self.image_path, filename)
+                    self.process_image(image_from_web, image_path)
+                    print("[INFO] Saved", image_path)
+                except Exception as e:
+                    image_from_web.close()
+                    raise e
+#                    except OSError:
+#                        print("[WARNING] OS Error: %s, trying anyway", %(e))
+#                        rgb_im = image_from_web.convert('RGB')
+#                        process_image(rgb_im, output_size, image_path)
+
+    def scrape(self):
         print("[INFO] Gathering image links")
-        image_urls=[]
         count = 0
         missed_count = 0
         self.driver.get(self.url)
@@ -107,11 +189,14 @@ class GoogleImageScraper():
                     if(("http" in  src_link) and (not "encrypted" in src_link)):
                         print(
                             f"[INFO] {self.search_key} \t #{count} \t {src_link}")
-                        image_urls.append(src_link)
-                        count +=1
+                        try:
+                            self.process_url(src_link, count)
+                            count +=1
+                        except Exception as e:
+                            print("[WARNING] Skipping %s, %s"%(src_link, e))
                         break
-            except Exception:
-                print("[INFO] Unable to get link")
+            except Exception as e:
+                print("[INFO] Unable to get link: ", e)
 
             try:
                 #scroll page to load next image
@@ -125,57 +210,5 @@ class GoogleImageScraper():
                 time.sleep(1)
             indx += 1
 
-
         self.driver.quit()
         print("[INFO] Google search ended")
-        return image_urls
-
-    def save_images(self,image_urls, keep_filenames):
-        print(keep_filenames)
-        #save images into file directory
-        """
-            This function takes in an array of image urls and save it into the given image path/directory.
-            Example:
-                google_image_scraper = GoogleImageScraper("webdriver_path","image_path","search_key",number_of_photos)
-                image_urls=["https://example_1.jpg","https://example_2.jpg"]
-                google_image_scraper.save_images(image_urls)
-
-        """
-        print("[INFO] Saving image, please wait...")
-        for indx,image_url in enumerate(image_urls):
-            try:
-                print("[INFO] Image url:%s"%(image_url))
-                search_string = ''.join(e for e in self.search_key if e.isalnum())
-                image = requests.get(image_url,timeout=5)
-                if image.status_code == 200:
-                    with Image.open(io.BytesIO(image.content)) as image_from_web:
-                        try:
-                            if (keep_filenames):
-                                #extact filename without extension from URL
-                                o = urlparse(image_url)
-                                image_url = o.scheme + "://" + o.netloc + o.path
-                                name = os.path.splitext(os.path.basename(image_url))[0]
-                                #join filename and extension
-                                filename = "%s.%s"%(name,image_from_web.format.lower())
-                            else:
-                                filename = "%s%s.%s"%(search_string,str(indx),image_from_web.format.lower())
-
-                            image_path = os.path.join(self.image_path, filename)
-                            print(
-                                f"[INFO] {self.search_key} \t {indx} \t Image saved at: {image_path}")
-                            image_from_web.save(image_path)
-                        except OSError:
-                            rgb_im = image_from_web.convert('RGB')
-                            rgb_im.save(image_path)
-                        image_resolution = image_from_web.size
-                        if image_resolution != None:
-                            if image_resolution[0]<self.min_resolution[0] or image_resolution[1]<self.min_resolution[1] or image_resolution[0]>self.max_resolution[0] or image_resolution[1]>self.max_resolution[1]:
-                                image_from_web.close()
-                                os.remove(image_path)
-
-                        image_from_web.close()
-            except Exception as e:
-                print("[ERROR] Download failed: ",e)
-                pass
-        print("--------------------------------------------------")
-        print("[INFO] Downloads completed. Please note that some photos were not downloaded as they were not in the correct format (e.g. jpg, jpeg, png)")
