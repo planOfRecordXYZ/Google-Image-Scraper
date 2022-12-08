@@ -1,4 +1,4 @@
-# Google Image Scraper
+# Google Image Scraper for faces, for training AI models
 A library for scraping Google Images for a specified person. The library resizes the images to a specified resolution (standard: 512x512), crops them and makes sure the face is still in the image. This library can be used to train AI models such as Stable Diffusion on a specific person.
 
 ## Pre-requisites:
