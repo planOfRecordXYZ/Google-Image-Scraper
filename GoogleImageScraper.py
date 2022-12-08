@@ -116,17 +116,28 @@ class GoogleImageScraper():
         center_y = face_box[1] + face_box[3] / 2
         top = center_y - self.output_size / 2
         left = center_x - self.output_size / 2
+        bottom = center_y + self.output_size / 2
+        right = center_x + self.output_size / 2
 
+        # Adjust top and left values to ensure they do not go outside the bounds of the original image
         if top < 0:
+            bottom = bottom + abs(top)
             top = 0
         if left < 0:
+            right = right + abs(left)
             left = 0
-        if top + self.output_size > height:
-            top = height - self.output_size
-        if left + self.output_size > width:
-            left = width - self.output_size
 
-        image = image.crop((left, top, left + self.output_size, top + self.output_size))
+        # Adjust bottom and right values to ensure they do not go outside the bounds of the original image
+        if bottom > new_height:
+            rest = bottom - new_height
+            top = top - rest
+            bottom = new_height
+        if right > new_width:
+            rest = right - new_width
+            left = left - rest
+            right = new_width
+
+        image = image.crop((left, top, right, bottom))
         image.save(path)
 
     def process_url(self, image_url, count):
