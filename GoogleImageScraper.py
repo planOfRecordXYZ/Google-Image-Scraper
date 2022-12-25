@@ -89,7 +89,7 @@ class GoogleImageScraper():
       # Return the list of face bounding boxes
       return faces
 
-    def process_image(self, image, path):
+    def process_image(self, image):
         width, height = image.size
 
         if width < self.output_size or height < self.output_size:
@@ -105,66 +105,52 @@ class GoogleImageScraper():
         image = image.resize((new_width, new_height), Image.ANTIALIAS)
         face_boxes = self.detect_faces(image)
 
+        images = []
+        
         if len(face_boxes) == 0:
-            raise Exception("Has no faces")
+            print("[INFO] No faces found...")
 
-        if len(face_boxes) > 1:
-            raise Exception("Has more than one face")
+        for face_box in face_boxes:
+            center_x = face_box[0] + face_box[2] / 2
+            center_y = face_box[1] + face_box[3] / 2
+            top = center_y - self.output_size / 2
+            left = center_x - self.output_size / 2
+            bottom = center_y + self.output_size / 2
+            right = center_x + self.output_size / 2
 
-        face_box = face_boxes[0]
-        center_x = face_box[0] + face_box[2] / 2
-        center_y = face_box[1] + face_box[3] / 2
-        top = center_y - self.output_size / 2
-        left = center_x - self.output_size / 2
-        bottom = center_y + self.output_size / 2
-        right = center_x + self.output_size / 2
+            # Adjust top and left values to ensure they do not go outside the bounds of the original image
+            if top < 0:
+                bottom = bottom + abs(top)
+                top = 0
+            if left < 0:
+                right = right + abs(left)
+                left = 0
 
-        # Adjust top and left values to ensure they do not go outside the bounds of the original image
-        if top < 0:
-            bottom = bottom + abs(top)
-            top = 0
-        if left < 0:
-            right = right + abs(left)
-            left = 0
+            # Adjust bottom and right values to ensure they do not go outside the bounds of the original image
+            if bottom > new_height:
+                rest = bottom - new_height
+                top = top - rest
+                bottom = new_height
+            if right > new_width:
+                rest = right - new_width
+                left = left - rest
+                right = new_width
 
-        # Adjust bottom and right values to ensure they do not go outside the bounds of the original image
-        if bottom > new_height:
-            rest = bottom - new_height
-            top = top - rest
-            bottom = new_height
-        if right > new_width:
-            rest = right - new_width
-            left = left - rest
-            right = new_width
+            new_image = image.copy()
+            new_image = new_image.crop((left, top, right, bottom))
+            images.append(new_image)
+        
+        return images
 
-        image = image.crop((left, top, right, bottom))
-        image.save(path)
-
-    def process_url(self, image_url, count):
+    def process_url(self, image_url):
         print("[INFO] Saving image with URL: %s"%(image_url))
         search_string = ''.join(e for e in self.search_key if e.isalnum())
         image = requests.get(image_url,timeout=5)
         if image.status_code != 200:
             raise Exception("Discarded due to error code %s"%(image.status_code))
-        else:
-            with Image.open(io.BytesIO(image.content)) as image_from_web:
-                try:
-                    if (self.keep_filenames):
-                        #extact filename without extension from URL
-                        o = urlparse(image_url)
-                        image_url = o.scheme + "://" + o.netloc + o.path
-                        name = os.path.splitext(os.path.basename(image_url))[0]
-                        #join filename and extension
-                        filename = "%s.%s"%(name,image_from_web.format.lower())
-                    else:
-                        filename = "%s (%s).%s"%(self.token_name,str(count + 1),image_from_web.format.lower())
-
-                    image_path = os.path.join(self.image_path, filename)
-                    self.process_image(image_from_web, image_path)
-                    print("[INFO] Saved", image_path)
-                except Exception as e:
-                    image_from_web.close()
-                    raise e
+        
+        image_from_web = Image.open(io.BytesIO(image.content))
+        return image_from_web
 #                    except OSError:
 #                        print("[WARNING] OS Error: %s, trying anyway", %(e))
 #                        rgb_im = image_from_web.convert('RGB')
@@ -201,8 +187,37 @@ class GoogleImageScraper():
                         print(
                             f"[INFO] {self.search_key} \t #{count} \t {src_link}")
                         try:
-                            self.process_url(src_link, count)
-                            count +=1
+                            image_from_web = self.process_url(src_link)
+                            
+                            try:
+                                images = self.process_image(image_from_web)
+                                
+                                for image_count, image in enumerate(images):
+                                    if count >= self.number_of_images:
+                                        break
+                                
+                                    if (self.keep_filenames):
+                                        #extact filename without extension from URL
+                                        o = urlparse(image_url)
+                                        image_url = o.scheme + "://" + o.netloc + o.path
+                                        name = os.path.splitext(os.path.basename(image_url))[0]
+                                        #join filename and extension
+                                        if len(images) == 1:
+                                            filename = "%s.%s"%(name, image_from_web.format.lower())
+                                        else:
+                                            filename = "%s (%s).%s"%(name, image_count, image_from_web.format.lower())
+                                    else:
+                                        filename = "%s (%s).%s"%(self.token_name,str(count + 1), image_from_web.format.lower())
+                                    
+                                    image_path = os.path.join(self.image_path, filename)
+                                    image.save(image_path)
+                                    count +=1
+                                    image.close()
+
+                                image_from_web.close()
+                            except Exception as e:
+                                image_from_web.close()
+                                raise e
                         except Exception as e:
                             print("[WARNING] Skipping %s, %s"%(src_link, e))
                         break
