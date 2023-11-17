@@ -37,7 +37,7 @@ class SeleniumScraper():
                 options = Options()
                 if(headless):
                     options.add_argument('--headless')
-                driver = webdriver.Chrome(webdriver_path, chrome_options=options)
+                driver = webdriver.Chrome()
                 driver.set_window_size(1400,1050)
                 driver.get("https://www.google.com")
                 if driver.find_elements(By.ID, "L2AGLb"):
