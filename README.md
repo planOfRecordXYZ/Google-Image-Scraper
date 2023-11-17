@@ -22,21 +22,21 @@ This project was created to bypass Google Chrome's new restrictions on web scrap
 
 Type 
 ```
-python main.py --search-key "Elon Musk" --token_name "emsk"
+python3 main.py --search-key "Elon Musk" --token_name "emsk"
 ```
 
 This will search Google Images for "Elon Musk", detect the face, resize the image and keep the face within the frame. Photos will be stored with the names "photos/Elon Musk/emsk (1).jpg", "photos/Elon Musk/emsk (2).jpg" and so on in this example.
 
 Type
 ```
-python main.py --help
+python3 main.py --help
 ```
 for all the arguments
 
 The app also comes with a script, rename.py, to help you rename files in the generated folder. This is good if you want to manually remove some photos but want to name the files like ("emsk (1).jpg", "emsk (b).jpg") and so on. It is run with the same arguments:
 
 ```
-python rename.py --search-key "Elon Musk" --token_name "emsk"
+python3 rename.py --search-key "Elon Musk" --token_name "emsk"
 ```
 
 ## IMPORTANT:
